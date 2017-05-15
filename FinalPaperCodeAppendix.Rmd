@@ -1,0 +1,228 @@
+---
+title: "FinalPaperCodeAppendix"
+author: "James Swigart"
+date: "5/15/2017"
+output: html_document
+---
+#Code Appendix
+
+```{r, echo=F}
+require(dplyr)
+
+#creation of fake logit data with no association between variables.
+#modified from https://stats.stackexchange.com/questions/12857/generate-random-correlated-data-between-a-binary-and-a-continuous-variable/12858#12858
+n <- 1000000
+beta0 <- 0
+beta1 <- 0
+x <- runif(n=n, min=1, max=1000)
+pi_x <- exp(beta0 + beta1 * x) / (1 + exp(beta0 + beta1 * x))
+y <- rbinom(n=length(x), size=1, prob=pi_x)
+fakedata <- data.frame(x, pi_x, y)
+names(fakedata) <- c("Class_Size", "pi", "Grade_Change")
+#Grade_change = 1 if increase in expected grade, 0 if decrease
+fakeglm<-glm(fakedata$Class_Size~fakedata$Grade_Change)
+#verifies that fake grade data is indeed uncorrelated with class size
+summary(fakeglm)
+fake10<-sample_n(fakedata, 10)
+fake100<-sample_n(fakedata, 100)
+fake1000<-sample_n(fakedata, 1000)
+fake10000<-sample_n(fakedata, 10000)
+fake100000<-sample_n(fakedata, 100000)
+#fake1000000 should match original fake data as it includes all observations
+fake1000000<-sample_n(fakedata, 1000000)
+fake10glm<-glm(fake10$Class_Size~fake10$Grade_Change)
+fake100glm<-glm(fake100$Class_Size~fake100$Grade_Change)
+fake1000glm<-glm(fake1000$Class_Size~fake1000$Grade_Change)
+fake10000glm<-glm(fake10000$Class_Size~fake10000$Grade_Change)
+fake100000glm<-glm(fake100000$Class_Size~fake100000$Grade_Change)
+#fake1000000 should match original fake data
+fake1000000glm<-glm(fake1000000$Class_Size~fake1000000$Grade_Change)
+coef(fake10glm)
+coef(fake100glm)
+coef(fake1000glm)
+coef(fake10000glm)
+coef(fake100000glm)
+coef(fake1000000glm)
+```
+
+```{r}
+#lots of permuting to determine necessary sample size, measure bias and consistancy
+permuteFake10<-function(y){
+  shufflefake10<-sample(fake10$Grade_Change)
+  meandiff<-coef(glm(y~shufflefake10))
+  return(meandiff)
+  }
+
+set.seed(20170513)
+results10<-replicate(1000,permuteFake10(y=fake10$Grade_Change))
+mean(results10)
+
+permuteFake100<-function(y){
+  shufflefake100<-sample(fake100$Grade_Change)
+  meandiff<-coef(glm(y~shufflefake100))
+  return(meandiff)
+  }
+
+set.seed(20170513)
+results100<-replicate(1000,permuteFake100(y=fake100$Grade_Change))
+mean(results100)
+
+permuteFake1000<-function(y){
+  shufflefake1000<-sample(fake1000$Grade_Change)
+  meandiff<-coef(glm(y~shufflefake1000))
+  return(meandiff)
+  }
+
+set.seed(20170513)
+results1000<-replicate(1000,permuteFake1000(y=fake1000$Grade_Change))
+mean(results1000)
+
+permuteFake10000<-function(y){
+  shufflefake10000<-sample(fake10000$Grade_Change)
+  meandiff<-coef(glm(y~shufflefake10000))
+  return(meandiff)
+  }
+
+set.seed(20170513)
+results10000<-replicate(10,permuteFake10000(y=fake10000$Grade_Change))
+mean(results10000)
+
+permuteFake100000<-function(y){
+  shufflefake100000<-sample(fake100000$Grade_Change)
+  meandiff<-coef(glm(y~shufflefake100000))
+  return(meandiff)
+  }
+
+set.seed(20170513)
+results100000<-replicate(10,permuteFake100000(y=fake100000$Grade_Change))
+mean(results100000)
+
+permuteFake1000000<-function(y){
+  shufflefake1000000<-sample(fake1000000$Grade_Change)
+  meandiff<-coef(glm(y~shufflefake1000000))
+  return(meandiff)
+  }
+
+set.seed(20170513)
+results1000000<-replicate(10,permuteFake1000000(y=fake1000000$Grade_Change))
+mean(results1000000)
+```
+
+```{r}
+library(foreach) ## showing a different way to do parallel processing
+library(doParallel)
+registerDoParallel(cores=detectCores())
+set.seed(20170513)
+# Creating a function to assess the error rate of our p-values.
+#The test is based on the canned logit (glm). The function returns
+#the coefficient for the treatment effect and its p-value. (We later
+#do a randomization based test.)
+simError<-function(y,z){
+  ## y is an outcome
+  ## z is a treatment assignment
+  newz<-0 ## make truth H0: \tau=0
+  mytest<-function(newz){
+    ## mytest is a function of outcome, treatment assignment, and design
+    ## features (like the experimental blocking) that returns a p-value
+    ## newz is a treatment assignment
+    summary(glm(y~fake10000$Grade_Change))$coef
+  
+  }
+
+  mytest(newz)
+}
+
+#measures Type 1 error rate and power
+# Another way of checking for the error rate of our p-values.
+nsims<-1000
+simerrorrate<-function(){
+  pForTruth<-replicate(nsims,simError(y=fake10000$Grade_Change,z=newz))
+  errorrate<-mean(pForTruth<=.05)
+  return(errorrate)
+}
+
+simulations<-10
+multisims <- times(simulations) %dopar% { simerrorrate() }
+sdOfSims<-sd(multisims)
+sdOfSims
+
+# The standard error of the simulation is 0.0, which, like in the code above, is below 0.05.
+
+```
+
+
+```{r ps,results="asis"}
+## Make a confidence interval by inverting a hypothesis test.
+  
+possibleH0<-seq(0,1,0.1) # interval 0-1, going by 0.1 
+ # All the possible outcomes that have p-values over 0.05
+ # Confidence interval gives us information on the possible values of coefficients 
+#we cannot reject 
+ 
+mytestCLTIID<-function(h,y,z,s){
+  newy<-y-(z*h) # newy = Y0 if the z is a non-zero, when it gets a treatment.
+  #h is the different treatment effects (0~1). 
+  summary(lm(newy~z+s))$coef["z","Pr(>|t|)"]
+}
+
+pForPossibleH0<-sapply(possibleH0,function(h,y=fake10000$Grade_Change,z=fake10000$Grade_Change,s=fake10000$pi){
+					 mytestCLTIID(h=h,y=y,z=z,s=s)
+})
+names(pForPossibleH0)<-possibleH0
+pForPossibleH0 # P-values for each treatment effect, if p-value is below 0.05
+#- very unlikely for this to happen. If p-value is really small, we can reject 
+#it and it is not in the confidence interval.  All of the results are 0, this 
+#is unlikely true.
+
+```
+
+```{r cicoverage, cache=TRUE}
+#modified from https://gist.githubusercontent.com/anonymous/73f64e1b8ff7e972fc3b/raw/0d5bfaaed280ada478d7943fb4da9b3899d51e27/bootstrapCIs.R
+
+ getCI <- function(B, muH0, sdH0, N) {
+    getM <- function(orgDV, idx) {
+        bsM   <- mean(orgDV[idx])                       # M*
+        bsS2M <- (((N-1) / N) * var(orgDV[idx])) / N    # S^2*(M)
+        c(bsM, bsS2M)
+    }
+
+    DV  <- fake10000$Grade_Change            # simulated data: original sample
+    M   <- mean(DV)                        # M from original sample
+    S2M <- (((N-1)/N) * var(DV)) / N       # S^2(M) from original sample
+
+    # bootstrap
+    boots   <- t(replicate(B, getM(DV, sample(seq(along=DV), replace=TRUE))))
+    Mstar   <- boots[ , 1]                 # M* for each replicate
+    S2Mstar <- boots[ , 2]                 # S^2*(M) for each replicate
+    biasM   <- mean(Mstar) - M             # bias of estimator M
+
+    # indices for sorted vector of estimates
+    idx   <- trunc((B + 1) * c(0.05/2, 1 - 0.05/2))
+    zCrit <- qnorm(c(1 - 0.05/2, 0.05/2))  # z-quantiles from std-normal distribution
+    tStar <- (Mstar-M) / sqrt(S2Mstar)     # t*
+    tCrit <- sort(tStar)[rev(idx)]         # t-quantiles from empirical t* distribution
+
+    ciBasic <- 2*M - sort(Mstar)[rev(idx)] # basic CI
+    ciPerc  <- sort(Mstar)[idx]            # percentile CI
+    ciNorm  <- M-biasM - zCrit*sd(Mstar)   # normal CI
+    ciT     <- M - tCrit * sqrt(S2M)       # studentized t-CI
+
+    c(basic=ciBasic, percentile=ciPerc, normal=ciNorm, t=ciT)
+}
+
+## 1000 bootstraps - this will take a while
+B    <- 1000                  # number of replicates
+muH0 <- 0.5                  # for generating data: true mean
+sdH0 <- 0.5                   # for generating data: true sd
+N    <- 10000                  # sample size
+DV   <- fake10000$Grade_Change # simulated data: original sample
+Nrep <- 10                 # number of bootstraps
+CIs  <- t(replicate(Nrep, getCI(B=B, muH0=muH0, sdH0=sdH0, N=N)))
+
+## coverage probabilities
+sum((CIs[ , "basic1"]      < muH0) & (CIs[ , "basic2"]      > muH0)) / Nrep
+sum((CIs[ , "percentile1"] < muH0) & (CIs[ , "percentile2"] > muH0)) / Nrep
+sum((CIs[ , "normal1"]     < muH0) & (CIs[ , "normal2"]     > muH0)) / Nrep
+sum((CIs[ , "t1"]          < muH0) & (CIs[ , "t2"]          > muH0)) / Nrep
+```
+
